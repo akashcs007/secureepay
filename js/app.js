@@ -1,5 +1,5 @@
 // PaySecure App - Main JavaScript File
-// Version: 1.0.1 - Fixed transfer system
+// Version: 1.0.0
 
 const APP_NAME = 'paySecureApp';
 
@@ -47,18 +47,12 @@ function saveData() {
     localStorage.setItem(APP_NAME, JSON.stringify(appData));
 }
 
-// Get current user from session (always fresh from appData)
+// Get current user from session
 function getCurrentUser() {
     const userStr = sessionStorage.getItem('currentUser');
     if (userStr) {
         const sessionUser = JSON.parse(userStr);
-        // Always get fresh data from appData
-        const freshUser = appData.users.find(u => u.id === sessionUser.id);
-        if (freshUser) {
-            // Update session with fresh data
-            sessionStorage.setItem('currentUser', JSON.stringify(freshUser));
-            return freshUser;
-        }
+        return appData.users.find(u => u.id === sessionUser.id);
     }
     return null;
 }
@@ -66,17 +60,6 @@ function getCurrentUser() {
 // Set current user in session
 function setCurrentUser(user) {
     sessionStorage.setItem('currentUser', JSON.stringify(user));
-}
-
-// Update current user session with fresh data
-function refreshCurrentUser() {
-    const currentUser = getCurrentUser();
-    if (currentUser) {
-        const freshUser = appData.users.find(u => u.id === currentUser.id);
-        if (freshUser) {
-            setCurrentUser(freshUser);
-        }
-    }
 }
 
 // Clear current user
@@ -122,8 +105,6 @@ function updateUI() {
 // Update order badge
 function updateOrderBadge() {
     const user = getCurrentUser();
-    if (!user) return;
-    
     const activeOrders = appData.orders.filter(o => 
         (o.buyerEmail === user.email || o.sellerEmail === user.email) &&
         ['initiated', 'accepted', 'shipped'].includes(o.status)
@@ -172,8 +153,6 @@ function showNotification(title, message, type = 'success') {
 // Load orders
 function loadOrders(type = 'buyer') {
     const user = getCurrentUser();
-    if (!user) return;
-    
     const container = document.getElementById('ordersList');
     
     const orders = appData.orders.filter(o => 
@@ -243,8 +222,6 @@ function loadOrders(type = 'buyer') {
 // Load seller orders
 function loadSellerOrders() {
     const user = getCurrentUser();
-    if (!user) return;
-    
     const container = document.getElementById('sellerOrdersList');
     
     const orders = appData.orders.filter(o => o.sellerEmail === user.email);
@@ -306,7 +283,6 @@ window.acceptOrder = function(orderId) {
     if (order) {
         order.status = 'accepted';
         saveData();
-        refreshCurrentUser();
         loadOrders('seller');
         loadSellerOrders();
         showNotification('Order Accepted', 'Please ship the product', 'success');
@@ -317,16 +293,11 @@ window.rejectOrder = function(orderId) {
     const order = appData.orders.find(o => o.id === orderId);
     if (order) {
         order.status = 'cancelled';
-        
-        // Return coins from escrow to buyer
-        const buyerIndex = appData.users.findIndex(u => u.email === order.buyerEmail);
-        if (buyerIndex !== -1) {
-            appData.users[buyerIndex].escrowBalance -= order.amount;
-            appData.users[buyerIndex].coinBalance += order.amount;
-        }
-        
+        const buyer = appData.users.find(u => u.email === order.buyerEmail);
+        const buyerIndex = appData.users.findIndex(u => u.id === buyer.id);
+        appData.users[buyerIndex].escrowBalance -= order.amount;
+        appData.users[buyerIndex].coinBalance += order.amount;
         saveData();
-        refreshCurrentUser();
         updateUI();
         loadOrders('seller');
         loadSellerOrders();
@@ -339,7 +310,6 @@ window.shipOrder = function(orderId) {
     if (order) {
         order.status = 'shipped';
         saveData();
-        refreshCurrentUser();
         loadOrders('seller');
         loadSellerOrders();
         showNotification('Marked as Shipped', 'Waiting for buyer confirmation', 'success');
@@ -350,33 +320,24 @@ window.confirmDelivery = function(orderId) {
     const order = appData.orders.find(o => o.id === orderId);
     if (order) {
         order.status = 'completed';
+        const buyer = appData.users.find(u => u.email === order.buyerEmail);
+        const seller = appData.users.find(u => u.email === order.sellerEmail);
+        const buyerIndex = appData.users.findIndex(u => u.id === buyer.id);
+        const sellerIndex = appData.users.findIndex(u => u.id === seller.id);
         
-        // Move coins from buyer's escrow to seller's wallet
-        const buyerIndex = appData.users.findIndex(u => u.email === order.buyerEmail);
-        const sellerIndex = appData.users.findIndex(u => u.email === order.sellerEmail);
+        appData.users[buyerIndex].escrowBalance -= order.amount;
+        appData.users[sellerIndex].coinBalance += order.amount;
         
-        if (buyerIndex !== -1) {
-            appData.users[buyerIndex].escrowBalance -= order.amount;
-        }
-        
-        if (sellerIndex !== -1) {
-            appData.users[sellerIndex].coinBalance += order.amount;
-        }
-        
-        // Add to transaction history
         appData.transactions.push({
             id: Date.now().toString(),
             type: 'escrow',
-            from: order.buyerEmail,
-            to: order.sellerEmail,
+            from: buyer.email,
+            to: seller.email,
             amount: order.amount,
-            paymentType: 'coins',
-            description: order.productName,
             timestamp: new Date().toISOString()
         });
         
         saveData();
-        refreshCurrentUser();
         updateUI();
         loadOrders('buyer');
         showNotification('Order Complete', 'Coins transferred to seller', 'success');
@@ -388,7 +349,6 @@ window.disputeOrder = function(orderId) {
     if (order) {
         order.status = 'disputed';
         saveData();
-        refreshCurrentUser();
         loadOrders('buyer');
         showNotification('Order Disputed', 'Support will review your case', 'error');
     }
@@ -435,11 +395,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const email = document.getElementById('loginEmail').value.trim();
         const password = document.getElementById('loginPassword').value;
         
-        if (!email || !password) {
-            showMessage('error', 'Please enter email and password');
-            return;
-        }
-        
         const user = appData.users.find(u => u.email === email && u.password === password);
         
         if (user) {
@@ -483,9 +438,6 @@ document.addEventListener('DOMContentLoaded', function() {
         showMessage('success', 'Account created! You received 1000 coins and $1000 cash. Please login.');
         document.getElementById('loginTab').click();
         document.getElementById('loginEmail').value = email;
-        document.getElementById('registerName').value = '';
-        document.getElementById('registerEmail').value = '';
-        document.getElementById('registerPassword').value = '';
     });
 
     // Navigation buttons
@@ -509,4 +461,253 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('buyBackBtn')?.addEventListener('click', () => showScreen('businessPaymentScreen'));
     document.getElementById('sellBackBtn')?.addEventListener('click', () => showScreen('businessPaymentScreen'));
     document.getElementById('ordersBackBtn')?.addEventListener('click', () => showScreen('homeScreen'));
-    document.getElementById('settingsBackBtn')?.addEventListener('click', () => showScreen('home
+    document.getElementById('settingsBackBtn')?.addEventListener('click', () => showScreen('homeScreen'));
+
+    // Business payment
+    document.getElementById('buyProductBtn')?.addEventListener('click', () => showScreen('buyProductScreen'));
+    document.getElementById('sellProductBtn')?.addEventListener('click', () => {
+        showScreen('sellProductsScreen');
+        loadSellerOrders();
+    });
+
+    // Place order
+        const placeOrderBtn = document.getElementById('placeOrderBtn');
+        if (placeOrderBtn) {
+            placeOrderBtn.addEventListener('click', function() {
+        const sellerEmail = document.getElementById('buySellerEmail').value.trim();
+        const productName = document.getElementById('productName').value.trim();
+        const amount = parseInt(document.getElementById('buyAmount').value);
+        const description = document.getElementById('buyDescription').value;
+        
+        if (!sellerEmail || !productName || !amount || !description) {
+            showNotification('Error', 'Please fill in all fields', 'error');
+            return;
+        }
+        
+        const buyer = getCurrentUser();
+        const seller = appData.users.find(u => u.email === sellerEmail);
+        
+        if (!seller) {
+            showNotification('Error', 'Seller not found', 'error');
+            return;
+        }
+        
+        if (seller.id === buyer.id) {
+            showNotification('Error', 'Cannot buy from yourself', 'error');
+            return;
+        }
+        
+        if (amount > buyer.coinBalance) {
+            showNotification('Error', 'Insufficient coins', 'error');
+            return;
+        }
+        
+        const buyerIndex = appData.users.findIndex(u => u.id === buyer.id);
+        appData.users[buyerIndex].coinBalance -= amount;
+        appData.users[buyerIndex].escrowBalance += amount;
+        
+        const order = {
+            id: Date.now().toString(),
+            buyerEmail: buyer.email,
+            sellerEmail: sellerEmail,
+            productName: productName,
+            amount: amount,
+            description: description,
+            status: 'initiated',
+            createdAt: new Date().toISOString()
+        };
+        
+        appData.orders.push(order);
+        saveData();
+        updateUI();
+        
+        showNotification('Order Placed', `${amount} coins held in escrow`, 'success');
+        
+        document.getElementById('buySellerEmail').value = '';
+        document.getElementById('productName').value = '';
+        document.getElementById('buyAmount').value = '';
+        document.getElementById('buyDescription').value = '';
+        
+        showScreen('ordersScreen');
+        loadOrders('buyer');
+    });
+
+    // Order tabs
+    document.getElementById('buyerOrdersTab')?.addEventListener('click', function() {
+        this.classList.add('active');
+        document.getElementById('sellerOrdersTab').classList.remove('active');
+        loadOrders('buyer');
+    });
+
+    document.getElementById('sellerOrdersTab')?.addEventListener('click', function() {
+        this.classList.add('active');
+        document.getElementById('buyerOrdersTab').classList.remove('active');
+        loadOrders('seller');
+    });
+
+    // Exchange tabs
+    document.getElementById('coinToCashTab')?.addEventListener('click', function() {
+        this.classList.add('active');
+        document.getElementById('cashToCoinTab').classList.remove('active');
+        document.getElementById('coinToCashForm').style.display = 'block';
+        document.getElementById('cashToCoinForm').style.display = 'none';
+    });
+
+    document.getElementById('cashToCoinTab')?.addEventListener('click', function() {
+        this.classList.add('active');
+        document.getElementById('coinToCashTab').classList.remove('active');
+        document.getElementById('cashToCoinForm').style.display = 'block';
+        document.getElementById('coinToCashForm').style.display = 'none';
+    });
+
+    // Exchange preview
+    document.getElementById('coinAmount')?.addEventListener('input', function() {
+        const amount = parseFloat(this.value) || 0;
+        document.getElementById('coinToCashPreview').textContent = `You will receive: $${amount.toFixed(2)}`;
+    });
+
+    document.getElementById('cashAmount')?.addEventListener('input', function() {
+        const amount = parseFloat(this.value) || 0;
+        document.getElementById('cashToCoinPreview').textContent = `You will receive: ${amount.toFixed(0)} Coins`;
+    });
+
+    // Convert buttons
+    document.getElementById('convertToCashBtn')?.addEventListener('click', function() {
+        const amount = parseFloat(document.getElementById('coinAmount').value);
+        const user = getCurrentUser();
+        
+        if (!amount || amount <= 0) {
+            showNotification('Error', 'Enter valid amount', 'error');
+            return;
+        }
+        
+        if (amount > user.coinBalance) {
+            showNotification('Error', 'Insufficient coins', 'error');
+            return;
+        }
+        
+        const userIndex = appData.users.findIndex(u => u.id === user.id);
+        appData.users[userIndex].coinBalance -= amount;
+        appData.users[userIndex].cashBalance += amount;
+        
+        saveData();
+        updateUI();
+        
+        showNotification('Exchange Complete', `${amount} coins converted to $${amount}`, 'success');
+        document.getElementById('coinAmount').value = '';
+        document.getElementById('coinToCashPreview').textContent = 'You will receive: $0.00';
+    });
+
+    document.getElementById('convertToCoinBtn')?.addEventListener('click', function() {
+        const amount = parseFloat(document.getElementById('cashAmount').value);
+        const user = getCurrentUser();
+        
+        if (!amount || amount <= 0) {
+            showNotification('Error', 'Enter valid amount', 'error');
+            return;
+        }
+        
+        if (amount > user.cashBalance) {
+            showNotification('Error', 'Insufficient cash', 'error');
+            return;
+        }
+        
+        const userIndex = appData.users.findIndex(u => u.id === user.id);
+        appData.users[userIndex].cashBalance -= amount;
+        appData.users[userIndex].coinBalance += amount;
+        
+        saveData();
+        updateUI();
+        
+        showNotification('Exchange Complete', `$${amount} converted to ${amount} coins`, 'success');
+        document.getElementById('cashAmount').value = '';
+        document.getElementById('cashToCoinPreview').textContent = 'You will receive: 0 Coins';
+    });
+
+    // Send payment
+    document.getElementById('sendPaymentType')?.addEventListener('change', updateSendBalance);
+
+    document.getElementById('sendPaymentSubmitBtn')?.addEventListener('click', function() {
+        const recipientEmail = document.getElementById('sendRecipientEmail').value.trim();
+        const paymentType = document.getElementById('sendPaymentType').value;
+        const amount = parseFloat(document.getElementById('sendAmount').value);
+        
+        if (!recipientEmail || !amount || amount <= 0) {
+            showNotification('Error', 'Please fill in all fields correctly', 'error');
+            return;
+        }
+        
+        const sender = getCurrentUser();
+        const recipient = appData.users.find(u => u.email === recipientEmail);
+        
+        if (!recipient) {
+            showNotification('Error', 'Recipient not found', 'error');
+            return;
+        }
+        
+        if (recipient.id === sender.id) {
+            showNotification('Error', 'Cannot send to yourself', 'error');
+            return;
+        }
+        
+        const balance = paymentType === 'coins' ? sender.coinBalance : sender.cashBalance;
+        
+        if (amount > balance) {
+            showNotification('Error', 'Insufficient balance', 'error');
+            return;
+        }
+        
+        const senderIndex = appData.users.findIndex(u => u.id === sender.id);
+        const recipientIndex = appData.users.findIndex(u => u.id === recipient.id);
+        
+        if (paymentType === 'coins') {
+            appData.users[senderIndex].coinBalance -= amount;
+            appData.users[recipientIndex].coinBalance += amount;
+        } else {
+            appData.users[senderIndex].cashBalance -= amount;
+            appData.users[recipientIndex].cashBalance += amount;
+        }
+        
+        appData.transactions.push({
+            id: Date.now().toString(),
+            type: 'transfer',
+            from: sender.email,
+            to: recipient.email,
+            amount: amount,
+            paymentType: paymentType,
+            timestamp: new Date().toISOString()
+        });
+        
+        saveData();
+        updateUI();
+        
+        showNotification('Payment Sent', `${amount} ${paymentType} sent to ${recipientEmail}`, 'success');
+        
+        document.getElementById('sendRecipientEmail').value = '';
+        document.getElementById('sendAmount').value = '';
+        
+        showScreen('homeScreen');
+    });
+
+    // Add test funds
+    document.getElementById('addTestFundsBtn')?.addEventListener('click', function() {
+        const user = getCurrentUser();
+        const userIndex = appData.users.findIndex(u => u.id === user.id);
+        
+        appData.users[userIndex].coinBalance += 500;
+        appData.users[userIndex].cashBalance += 500;
+        
+        saveData();
+        updateUI();
+        
+        showNotification('Funds Added', '500 coins and $500 cash added to your account', 'success');
+    });
+
+    // Logout
+    document.getElementById('logoutBtn')?.addEventListener('click', function() {
+        clearCurrentUser();
+        document.getElementById('appContainer').style.display = 'none';
+        document.getElementById('loginScreen').style.display = 'block';
+        showNotification('Logged Out', 'You have been signed out', 'success');
+    });
+});
