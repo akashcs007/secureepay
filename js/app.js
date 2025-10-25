@@ -471,9 +471,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // Place order
-        const placeOrderBtn = document.getElementById('placeOrderBtn');
-        if (placeOrderBtn) {
-            placeOrderBtn.addEventListener('click', function() {
+    document.getElementById('placeOrderBtn')?.addEventListener('click', function() {
         const sellerEmail = document.getElementById('buySellerEmail').value.trim();
         const productName = document.getElementById('productName').value.trim();
         const amount = parseInt(document.getElementById('buyAmount').value);
